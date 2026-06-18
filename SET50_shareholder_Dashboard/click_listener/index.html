@@ -1,0 +1,89 @@
+<html>
+<body>
+<script>
+    // =============================================
+    // Streamlit Custom Component: Click Listener
+    // Bridges postMessage from Pyvis iframe → Streamlit
+    //
+    // Lifecycle:
+    //   1. Streamlit mounts the iframe
+    //   2. We send 'componentReady' — Streamlit acknowledges us
+    //   3. Streamlit sends 'streamlit:render' with args
+    //   4. We set frame height to 0 (invisible)
+    //   5. We listen for 'pyvis_node_click' from sibling iframe
+    //   6. On click, we send 'setComponentValue' back to Streamlit
+    //
+    // FIX: Retry componentReady until Streamlit acknowledges with 'render'
+    // =============================================
+
+    var _registered = false;
+    var _pendingValue = null;
+    var _retryCount = 0;
+    var _retryTimer = null;
+
+    function sendToStreamlit(type, data) {
+        var msg = Object.assign({isStreamlitMessage: true, type: type}, data);
+        window.parent.postMessage(msg, '*');
+    }
+
+    function tryRegister() {
+        if (_registered) return;
+        _retryCount++;
+        sendToStreamlit('streamlit:componentReady', {apiVersion: 1});
+        // Retry up to 50 times (10 seconds)
+        if (_retryCount < 50) {
+            _retryTimer = setTimeout(tryRegister, 200);
+        }
+    }
+
+    // Listen for ALL messages from parent (Streamlit framework)
+    window.addEventListener('message', function(event) {
+        if (!event.data) return;
+
+        // Streamlit acknowledges us with a 'render' message
+        if (event.data.type === 'streamlit:render') {
+            _registered = true;
+            if (_retryTimer) clearTimeout(_retryTimer);
+
+            // Make ourselves invisible
+            sendToStreamlit('streamlit:setFrameHeight', {height: 0});
+
+            // If we captured a click before registration, send it now
+            if (_pendingValue !== null) {
+                sendToStreamlit('streamlit:setComponentValue', {value: _pendingValue});
+                _pendingValue = null;
+            }
+        }
+
+        // Pyvis click from sibling iframe (relayed through parent window)
+        if (event.data.type === 'pyvis_node_click') {
+            var payload = {node: event.data.node, ts: Date.now()};
+            if (_registered) {
+                sendToStreamlit('streamlit:setComponentValue', {value: payload});
+            } else {
+                _pendingValue = payload;
+            }
+        }
+    });
+
+    // Also listen on parent window for messages from sibling iframes
+    try {
+        window.parent.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'pyvis_node_click') {
+                var payload = {node: event.data.node, ts: Date.now()};
+                if (_registered) {
+                    sendToStreamlit('streamlit:setComponentValue', {value: payload});
+                } else {
+                    _pendingValue = payload;
+                }
+            }
+        });
+    } catch(e) {
+        // Silently ignore if parent access is blocked
+    }
+
+    // Start registration attempts
+    tryRegister();
+</script>
+</body>
+</html>
