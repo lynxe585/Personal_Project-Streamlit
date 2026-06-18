@@ -21,7 +21,8 @@ if "selected_node_key" not in st.session_state:
 # LOAD CSS
 # ===========================
 try:
-    with open('style.css') as f:
+    css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'style.css')
+    with open(css_path, encoding='utf-8') as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 except FileNotFoundError:
     st.warning("style.css not found — running without custom styles.")
